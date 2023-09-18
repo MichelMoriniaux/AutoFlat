@@ -12,17 +12,40 @@
  *  Michel Moriniaux 2019
 */
 
+
+#define NANO                0             // Arduino Nano
+#define XIAO                1             // Seeduino Xiao
+#define ON                  1             // EL panel or motor is on
+#define OFF                 0             // EL panel or motor is off
+
+// Board config
+#define SERVO               OFF           // 1 servo present, 0 no servo
+#define BOARD               NANO          // NANO or XIAO
+#define STOREPOS            OFF           // store the cap position in non-volatile memory
+
+// includes
 #include <Arduino.h>
 #include <myQueue.h>                      //  By Steven de Salas
+#if BOARD == XIAO
 #include <FlashStorage.h>
+#endif
+#if BOARD == NANO
+#include <myEEPROM.h>                     // needed for EEPROM
+#include <myeepromanything.h>             // needed for EEPROM
+#endif
+#if SERVO == ON
 #include <Servo.h>
+#endif
 
 #define DEFAULTOPEN         58            // default position for servo open
 #define DEFAULTCLOSED       160           // default position for servo closed
 #define SERVOPIN            5             // Pin to which the servo is connected to
-#define LIGHTPIN            A1             // Pin that controls the light
-#define ON                  1             // EL panel or motor is on
-#define OFF                 0             // EL panel or motor is off
+#if BOARD == XIAO
+#define LIGHTPIN            A1            // Pin that controls the light
+#endif
+#if BOARD == NANO
+#define LIGHTPIN            3             // Pin that controls the light
+#endif
 #define LIGHTMAX            255           // maximum light brightness
 #define CAPOPEN             2             // cap is open
 #define CAPCLOSED           1             // cap is closed
@@ -30,7 +53,7 @@
 #define EEPROMSIZE          1024          // ATMEGA328P 1024 EEPROM
 #define EEPROMWRITEINTERVAL 10000L        // interval in milliseconds to wait after a move before writing settings to EEPROM, 10s
 #define VALIDDATAFLAG       99            // valid eeprom data flag
-#define SERIALPORTSPEED     9600         // 9600, 14400, 19200, 28800, 38400, 57600
+#define SERIALPORTSPEED     9600          // 9600, 14400, 19200, 28800, 38400, 57600
 #define QUEUELENGTH         20            // number of commands that can be saved in the serial queue
 #define PWMFREQ             20000         //pwm frequency
 #define EOFSTR              '\n'
@@ -47,9 +70,15 @@
 //#define DEBUG 1
 //#define LOOPTIMETEST 1
 
+#if BOARD == XIAO
+#define MYSERIAL                  SerialUSB
+#endif
+#if BOARD == NANO
+#define MYSERIAL                  Serial
+#endif
 #ifdef DEBUG                                          //Macros are usually in all capital letters.
-#define DebugPrint(...) SerialUSB.print(__VA_ARGS__)     //DPRINT is a macro, debug print
-#define DebugPrintln(...) SerialUSB.println(__VA_ARGS__) //DPRINTLN is a macro, debug print with new line
+#define DebugPrint(...) MYSERIAL.print(__VA_ARGS__)     //DPRINT is a macro, debug print
+#define DebugPrintln(...) MYSERIAL.println(__VA_ARGS__) //DPRINTLN is a macro, debug print with new line
 #else
 #define DebugPrint(...)                               //now defines a blank line
 #define DebugPrintln(...)                             //now defines a blank line
@@ -57,42 +86,52 @@
 
 struct config_t {
   int validdata;                          // if this is 99 then data is valid
+#if STOREPOS == ON
   int capposition;                        // last cap position
+#endif
   int closedcapposition;                  // servo position when the cap is closed
   int opencapposition;                    // servo position when the cap is open
   int lightbrightness;                    // preset lightbrightness
 } autoflat;
 
+int datasize = sizeof( autoflat );        // will hold size of the struct autoflat
+int nlocations = EEPROMSIZE / datasize;   // number of storage locations available in EEPROM
+
 char programVersion[] = "001";
 char ProgramAuthor[]  = "MMX";
 String commands = "XSVYZJPMNOCQDLB";
 
-int capposition;                          // current cap position
-int captargetposition;                    // target cap position
-int capstatus;                            // cap is open, moving or closed
-int lightstatus;                          // light turned on or off
-int motorstatus;                          // is the motor running or stopped
-int currentaddr;                          // will be address in eeprom of the data stored
-byte writenow;                            // should we update values in eeprom
+int capposition = DEFAULTCLOSED;          // current cap position
+int captargetposition = capposition;      // target cap position
+int capstatus = CAPCLOSED;                // cap is open, moving or closed
+int lightstatus = OFF;                    // light turned on or off
+int motorstatus = OFF;                    // is the motor running or stopped
+int currentaddr = 0;                      // will be address in eeprom of the data stored
+byte writenow = 0;                        // should we update values in eeprom
+unsigned long lasteepromwrite = millis();
 
 Queue<String> queue(QUEUELENGTH);         // receive serial queue of commands
 String line;                              // buffer for serial data
 char temp[10];
-unsigned long lasteepromwrite;
 
 String osorzeros = "000";                 // nobody can agree wether the Alnitak protocol uses OOO or 000 (SGP uses 000, NINA OOO ) so lets adapt
 
+#if SERVO == ON
 Servo myservo;                            // create servo object to control a servo
 // twelve servo objects can be created on most boards
+#endif
 
-int pos = 0;                              // variable to store the servo position
+int pos = DEFAULTCLOSED;                              // variable to store the servo position
+
 
 void clearSerialPort()
 {
-  while ( SerialUSB.available() )
-    SerialUSB.read();
+  while ( MYSERIAL.available() )
+    MYSERIAL.read();
 }
 
+
+#if BOARD == XIAO
 void serialEventRun()
 {
   if (SerialUSB.available())
@@ -100,15 +139,17 @@ void serialEventRun()
     serialEvent();
   }
 }
+#endif
+
 
 // SerialEvent occurs whenever new data comes in the serial RX.
 void serialEvent()
 {
-  // : starts the command, # ends the command, do not store these in the command buffer
-  // read the command until the terminating # character
-  while (SerialUSB.available() )
+  // '>' starts the command, '\r' or '\n' ends the command, do not store these in the command buffer
+  // read the command until the terminating character
+  while (MYSERIAL.available() )
   {
-    char inChar = SerialUSB.read();
+    char inChar = MYSERIAL.read();
     switch ( inChar )
     {
       case '>':     // start
@@ -127,6 +168,8 @@ void serialEvent()
   }
 }
 
+
+// unused
 void openCap()
 {
   if ( lightstatus )
@@ -135,6 +178,8 @@ void openCap()
   capstatus = CAPOPEN;
 }
 
+
+// unused
 void closeCap()
 {
   int prelightstatus = lightstatus;
@@ -146,13 +191,16 @@ void closeCap()
   lightOn();
 }
 
+
 void moveTo( int pos )
 {
   DebugPrint(F("- to:"));
-  DebugPrint(pos);
-  DebugPrint(EOFSTR);
+  DebugPrintln(pos);
+  #if SERVO == ON
   myservo.write(pos);
+  #endif
 }
+
 
 void lightOn()
 {
@@ -160,11 +208,16 @@ void lightOn()
     pinMode(LIGHTPIN, OUTPUT);
     digitalWrite(LIGHTPIN, HIGH);
   } else {
-    //analogWrite(LIGHTPIN, autoflat.lightbrightness);
+#if BOARD == NANO
+    analogWrite(LIGHTPIN, autoflat.lightbrightness);
+#endif
+#if BOARD == XIAO
     pwm(LIGHTPIN, PWMFREQ, map(autoflat.lightbrightness, 0, 255, 0, 1023));
+#endif
   }
   lightstatus = ON;
 }
+
 
 void lightOff()
 {
@@ -173,59 +226,98 @@ void lightOff()
   lightstatus = OFF;
 }
 
+
 // EEPROM stuff
+#if BOARD == XIAO
 FlashStorage(eeprom_storage, config_t);
+
 
 void writeEEPROMNow()
 {
   eeprom_storage.write(autoflat);       // update values in EEPROM
   writenow = 0;
+  lasteepromwrite = millis();
 }
+#endif
+
+
+#if BOARD == NANO
+void writeEEPROMNow()
+{
+  autoflat.validdata = 0;
+  DebugPrintln(F("- writing EEPROM "));
+  EEPROM_writeAnything(currentaddr, autoflat);       // update validdata values in EEPROM
+  currentaddr += datasize;                           // goto next free address and write data
+  // bound check the eeprom storage and if greater than last index [0-EEPROMSIZE-1] then set to 0
+  if ( currentaddr >= (nlocations * datasize) )
+  {
+    currentaddr = 0;
+  }
+  autoflat.validdata = VALIDDATAFLAG;
+  EEPROM_writeAnything(currentaddr, autoflat);       // write the new values in EEPROM
+  DebugPrintln(F("- autoflat values: "));
+  DebugPrintln(autoflat.validdata);
+#if STOREPOS == ON
+  DebugPrintln(autoflat.capposition);
+#endif
+  DebugPrintln(autoflat.lightbrightness);
+  DebugPrintln(autoflat.opencapposition);
+  DebugPrintln(autoflat.closedcapposition);
+  writenow = 0;
+  lasteepromwrite = millis();
+}
+#endif
+
 
 void UpdateEEPROMCheck(void)
 {
   unsigned long timenow = millis();
   if (((timenow - lasteepromwrite) > EEPROMWRITEINTERVAL) || (timenow < lasteepromwrite))
   {
-    lasteepromwrite     = timenow ;           // update the timestamp
     autoflat.validdata = VALIDDATAFLAG;
+#if STOREPOS == ON
     autoflat.capposition = capposition;
+#endif
     writeEEPROMNow();                         // update values in EEPROM
     DebugPrint("Config saved");
   }
 }
 
+
 void setdefaults()
 {
   autoflat.validdata = VALIDDATAFLAG;
+#if STOREPOS == ON
   autoflat.capposition = DEFAULTCLOSED;
+#endif
   autoflat.closedcapposition = DEFAULTCLOSED;
   autoflat.opencapposition = DEFAULTOPEN;
   autoflat.lightbrightness = LIGHTMAX;
   writeEEPROMNow();                                   // update values in EEPROM
 }
 
-// SERIAL COMMS
+
+// MYSERIAL COMMS
 void SendPacket(char *str)
 {
   DebugPrint(F("- Send: "));
-  DebugPrint(str);
-  DebugPrint(EOFSTR);
-  SerialUSB.print(str);
+  DebugPrintln(str);
+  MYSERIAL.print(str);
 }
 
+
 // Serial Commands
-//void ser_comms(String receiveString)
 void ser_comms()
 {
+  if ( queue.count() == 0 )
+    return;
+
   int cmdval;
   String receiveString = "";
   String WorkString = "";
   int paramval = 0;
   String replystr = "";
 
-  if ( queue.count() == 0 )
-    return;
   receiveString = (String) queue.pop();
   String cmdstr = receiveString.substring(0, 1);
   cmdval = commands.indexOf(cmdstr);
@@ -236,17 +328,13 @@ void ser_comms()
     osorzeros = "OOO";
   }
   DebugPrint(F("- receive string="));
-  DebugPrint(receiveString);
-  DebugPrint(EOFSTR);
+  DebugPrintln(receiveString);
   DebugPrint(F("- cmdstr="));
-  DebugPrint(cmdstr);
-  DebugPrint(EOFSTR);
+  DebugPrintln(cmdstr);
   DebugPrint(F("- cmdval="));
-  DebugPrint(cmdval);
-  DebugPrint(EOFSTR);
+  DebugPrintln(cmdval);
   DebugPrint(F("- WorkString="));
-  DebugPrint(WorkString);
-  DebugPrint(EOFSTR);
+  DebugPrintln(WorkString);
 
   switch (cmdval)
   {
@@ -274,6 +362,8 @@ void ser_comms()
       SendPacket(temp);
       break;
     case 5: // get light brightness
+      DebugPrint(F("- autoflat.lightbrightness="));
+      DebugPrintln(autoflat.lightbrightness);
       sprintf(temp,"*J99%03d\n", autoflat.lightbrightness);
       SendPacket(temp);
       break;
@@ -297,6 +387,7 @@ void ser_comms()
     case 9: // open the cap
       if ( capstatus != CAPOPEN )
       {
+        lightOff();                                 // turn off the light if we are going to open the cap
         //openCap();
         captargetposition = autoflat.opencapposition;
       }
@@ -345,65 +436,79 @@ void ser_comms()
   }
 }
 
+
 void setup() {
-  int datasize;                             // will hold size of the struct autoflat - 4 bytes
-  int nlocations;                           // number of storage locations available in EEPROM
-  byte found;
+  byte found = 0;
 
   //----- PWM frequency for D3 & D11 -----
   //Timer2 divisor = 2, 16, 64, 128, 512, 2048
-  //TCCR2B = TCCR2B & B11111000 | B00000001;    // 31KHz
+  #if BOARD == NANO
+  TCCR2B = TCCR2B & B11111000 | B00000001;    // 31KHz
   //TCCR2B = TCCR2B & B11111000 | B00000010;    // 3.9KHz
   //TCCR2B = TCCR2B & B11111000 | B00000011;    // 980Hz
   //TCCR2B = TCCR2B & B11111000 | B00000100;    // 490Hz (default)
   //TCCR2B = TCCR2B & B11111000 | B00000101;    // 245Hz
   //TCCR2B = TCCR2B & B11111000 | B00000110;    // 122.5Hz
   //TCCR2B = TCCR2B & B11111000 | B00000111;    // 30.6Hz
-  SerialUSB.begin(SERIALPORTSPEED);            // initialize serial port
+  #endif
+
+  MYSERIAL.begin(SERIALPORTSPEED);            // initialize serial port
   clearSerialPort();                        // clear any garbage from serial buffer
-  pinMode(LIGHTPIN, OUTPUT);
+  lightOff();                               // init light pin and set to off
  
+  #if SERVO == ON
   myservo.attach(SERVOPIN);                 // attaches the servo on pin 9 to the servo object
-  capposition = myservo.read();    // get the current position of the servo
-  captargetposition = capposition;
-  
-  capstatus = CAPMOVING;
-  if ( capposition == autoflat.opencapposition )
-    capstatus = CAPOPEN;
-  if ( capposition == autoflat.closedcapposition )
-    capstatus = CAPCLOSED;
+  capposition = myservo.read();             // get the current position of the servo
+  #endif
+  captargetposition = capposition;          // default for capposition is DEFAULTCLOSED
 
   // initialize the EEPROM stuff
-  datasize = sizeof( autoflat );
-  found = 0;                        // start at 0 if not found later
+  found = 0;
+  #if BOARD == XIAO
   autoflat = eeprom_storage.read();
+
   if ( autoflat.validdata == VALIDDATAFLAG )   // check to see if the data is valid
   {
     found = 1;
   }
+  #endif
+  #if BOARD == NANO
+  // start at 0 if not found later
+  for (int lp1 = 0; lp1 < nlocations; lp1++ )
+  {
+    int addr = lp1 * datasize;
+    EEPROM_readAnything( addr, autoflat );
+    if ( autoflat.validdata == VALIDDATAFLAG ) // check to see if the data is valid
+    {
+      currentaddr = addr;                      // data was erased so write some default values
+      found = 1;
+      break;
+    }
+  }
+  #endif
   if ( found == 0 )
   {
+    // set defaults because not found
+    DebugPrintln(F("- writing defaults to EEPROM "));
     setdefaults();                   // set defaults because not found
   }
-
-
+  // configure with what we now know
+#if STOREPOS == ON
+  captargetposition = autoflat.capposition;
+#endif
+  if ( capposition == autoflat.opencapposition )
+    capstatus = CAPOPEN;
+  else if ( capposition == autoflat.closedcapposition )
+    capstatus = CAPCLOSED;
+  else
+    capstatus = CAPMOVING;
 }
 
-String str;
 
 void loop() {
   static byte MainStateMachine = State_Idle;
 
-  if ( queue.count() >= 1 )                 // check for serial command
-  {
-    ser_comms();
-  }
-  /*if ( SerialUSB.available()) {
-    DebugPrint(F("- received data "));
-    str = SerialUSB.readStringUntil('\r');
-    DebugPrint(F("- have a string "));
-    ser_comms(str.substring(1));
-  }*/
+  ser_comms();
   
   switch (MainStateMachine)
   {
@@ -412,11 +517,9 @@ void loop() {
       {
         MainStateMachine = State_InitMove;
         DebugPrint(F("- Idle => InitMove Target "));
-        DebugPrint(captargetposition);
-        DebugPrint(EOFSTR);
+        DebugPrintln(captargetposition);
         DebugPrint(F("- Current "));
-        DebugPrint(capposition);
-        DebugPrint(EOFSTR);
+        DebugPrintln(capposition);
       }
       else
       {
@@ -431,8 +534,7 @@ void loop() {
       capstatus = CAPMOVING;
       motorstatus = ON;
       MainStateMachine = State_Moving;
-      DebugPrint(F("- => State_Moving#"));
-      DebugPrint(EOFSTR);
+      DebugPrintln(F("- => State_Moving#"));
       break;
 
     case State_Moving:
@@ -458,8 +560,7 @@ void loop() {
         capstatus = CAPOPEN;
       motorstatus = OFF;
       MainStateMachine = State_Idle;
-      DebugPrint(F("- => State_Idle#"));
-      DebugPrint(EOFSTR);
+      DebugPrintln(F("- => State_Idle#"));
       break;
 
     default:
@@ -469,8 +570,7 @@ void loop() {
 
 #ifdef LOOPTIMETEST
   DebugPrint(F("- Loop End ="));
-  DebugPrint(millis());
-  DebugPrint(EOFSTR);
+  DebugPrintln(millis());
 #endif
 
 }
