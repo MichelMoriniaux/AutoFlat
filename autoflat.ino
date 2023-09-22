@@ -52,7 +52,7 @@
 #define CAPMOVING           0             // servo is moving
 #define EEPROMSIZE          1024          // ATMEGA328P 1024 EEPROM
 #define EEPROMWRITEINTERVAL 10000L        // interval in milliseconds to wait after a move before writing settings to EEPROM, 10s
-#define VALIDDATAFLAG       99            // valid eeprom data flag
+#define VALIDDATAFLAG       9999          // valid eeprom data flag
 #define SERIALPORTSPEED     9600          // 9600, 14400, 19200, 28800, 38400, 57600
 #define QUEUELENGTH         20            // number of commands that can be saved in the serial queue
 #define PWMFREQ             20000         //pwm frequency
