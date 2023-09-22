@@ -57,6 +57,11 @@
 #define QUEUELENGTH         20            // number of commands that can be saved in the serial queue
 #define PWMFREQ             20000         //pwm frequency
 #define EOFSTR              '\n'
+#if SERVO == ON
+#define FFVERSION           99            // FlipFlat ( we have a servo so the cover moves )
+#else
+#define FFVERSION           19            // FlatMan ( only light )
+#endif
 //  StateMachine definition
 #define State_Idle              0
 #define State_InitMove          1
@@ -340,48 +345,48 @@ void ser_comms()
   {
     // all the get go first followed by set
     case 0: // get position
-      sprintf(temp,"*X99%03d\n", capposition);
+      sprintf(temp,"*X%02d%03d\n", FFVERSION, capposition);
       SendPacket(temp);
       break;
     case 1: // get status
       //delay(100);
-      sprintf(temp,"*S99%d%d%d\n", motorstatus, lightstatus, capstatus);
+      sprintf(temp,"*S%02d%d%d%d\n", FFVERSION, motorstatus, lightstatus, capstatus);
       SendPacket(temp);
       break;
     case 2: // get firmware version
       //delay(100);
-      sprintf(temp,"*V99%s\n", programVersion);
+      sprintf(temp,"*V%02d%s\n", FFVERSION, programVersion);
       SendPacket(temp);
       break;
     case 3: // get open position
-      sprintf(temp,"*Y99%03d\n", autoflat.opencapposition);
+      sprintf(temp,"*Y%02d%03d\n", FFVERSION, autoflat.opencapposition);
       SendPacket(temp);
       break;
     case 4: // get closed position
-      sprintf(temp,"*Z99%03d\n", autoflat.closedcapposition);
+      sprintf(temp,"*Z%02d%03d\n", FFVERSION, autoflat.closedcapposition);
       SendPacket(temp);
       break;
     case 5: // get light brightness
       DebugPrint(F("- autoflat.lightbrightness="));
       DebugPrintln(autoflat.lightbrightness);
-      sprintf(temp,"*J99%03d\n", autoflat.lightbrightness);
+      sprintf(temp,"*J%02d%03d\n", FFVERSION, autoflat.lightbrightness);
       SendPacket(temp);
       break;
     case 6: // get the device id
-      sprintf(temp,"*P99%s\n", osorzeros.c_str());
+      sprintf(temp,"*P%02d%s\n", FFVERSION, osorzeros.c_str());
       SendPacket(temp);
       break;
     // only the set commands are listed here as they do not require a response
     case 7: // set open position
       autoflat.opencapposition = (int)WorkString.toInt();
       writenow = 1;
-      sprintf(temp,"*M99%03d\n", autoflat.opencapposition);
+      sprintf(temp,"*M%02d%03d\n", FFVERSION, autoflat.opencapposition);
       SendPacket(temp);
       break;
     case 8: // set closed position
       autoflat.closedcapposition = (int)WorkString.toInt();
       writenow = 1;
-      sprintf(temp,"*N99%03d\n", autoflat.closedcapposition);
+      sprintf(temp,"*N%02d%03d\n", FFVERSION, autoflat.closedcapposition);
       SendPacket(temp);
       break;
     case 9: // open the cap
@@ -391,7 +396,7 @@ void ser_comms()
         //openCap();
         captargetposition = autoflat.opencapposition;
       }
-      sprintf(temp,"*O99%s\n", osorzeros.c_str());
+      sprintf(temp,"*O%02d%s\n", FFVERSION, osorzeros.c_str());
       SendPacket(temp);
       break;
     case 10: // close the cap
@@ -400,12 +405,12 @@ void ser_comms()
         //closeCap();
         captargetposition = autoflat.closedcapposition;
       }
-      sprintf(temp,"*C99%s\n", osorzeros.c_str());
+      sprintf(temp,"*C%02d%s\n", FFVERSION, osorzeros.c_str());
       SendPacket(temp);
       break;
     case 11: // move to position
       captargetposition = (int)WorkString.toInt();
-      sprintf(temp,"*Q99%03d\n", captargetposition);
+      sprintf(temp,"*Q%02d%03d\n", FFVERSION, captargetposition);
       SendPacket(temp);
       break;
     case 12: // turn off the EL panel
@@ -413,7 +418,7 @@ void ser_comms()
       {
         lightOff();
       }
-      sprintf(temp,"*D99%s\n", osorzeros.c_str());
+      sprintf(temp,"*D%02d%s\n", FFVERSION, osorzeros.c_str());
       SendPacket(temp);
       break;
     case 13: // turn on the EL panel
@@ -421,7 +426,7 @@ void ser_comms()
       {
         lightOn();
       }
-      sprintf(temp,"*L99%s\n", osorzeros.c_str());
+      sprintf(temp,"*L%02d%s\n", FFVERSION, osorzeros.c_str());
       SendPacket(temp);
       break;
     case 14: // set brighness
@@ -430,7 +435,7 @@ void ser_comms()
       {
         lightOn();
       }
-      sprintf(temp,"*B99%03d\n", autoflat.lightbrightness);
+      sprintf(temp,"*B%02d%03d\n", FFVERSION, autoflat.lightbrightness);
       SendPacket(temp);
       break;
   }
